@@ -1,0 +1,45 @@
+name: Generate News Index
+
+on:
+  push:
+    paths:
+      - "news/**.md"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Generate news index JSON
+        run: |
+          echo "[]" > news/index.json
+          files=$(ls news/*.md | sort)
+
+          for file in $files; do
+            filename=$(basename "$file")
+
+            # 作成日時（最初のコミット）
+            created=$(git log --diff-filter=A --follow --format=%aI -- "$file" | tail -1)
+            # 更新日時（最新コミット）
+            updated=$(git log -1 --format=%aI -- "$file")
+
+            # タイトル（md の1行目を見出しとして使用）
+            title=$(head -n 1 "$file" | sed 's/^# *//')
+
+            jq --arg title "$title" \
+               --arg file "$filename" \
+               --arg created "$created" \
+               --arg updated "$updated" \
+               '. += [{"title":$title,"file":$file,"createdAt":$created,"updatedAt":$updated}]' \
+               news/index.json > tmp.json && mv tmp.json news/index.json
+          done
+
+      - name: Commit and push index.json
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add news/index.json
+          git commit -m "Update news index" || echo "No changes"
+          git push
