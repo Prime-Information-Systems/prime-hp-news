@@ -24,9 +24,26 @@ jobs:
 
       - name: Get changed files
         id: changes
-        run: |
-          echo "added_or_modified=$(git diff --name-only --diff-filter=AM ${{ github.event.before }} ${{ github.sha }} | grep '^news/.*\.md$' || true)" >> $GITHUB_OUTPUT
-          echo "deleted=$(git diff --name-only --diff-filter=D ${{ github.event.before }} ${{ github.sha }} | grep '^news/.*\.md$' || true)" >> $GITHUB_OUTPUT
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const files = await github.rest.repos.compareCommits({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              base: context.payload.before,
+              head: context.sha
+            });
+            const addedOrModified = files.data.files
+              .filter(f => f.status === 'added' || f.status === 'modified')
+              .map(f => f.filename)
+              .filter(name => name.startsWith("news/") && name.endsWith(".md"));
+            const deleted = files.data.files
+              .filter(f => f.status === 'removed')
+              .map(f => f.filename)
+              .filter(name => name.startsWith("news/") && name.endsWith(".md"));
+            core.setOutput("added_or_modified", addedOrModified.join(" "));
+            core.setOutput("deleted", deleted.join(" "));
+
 
       - name: Handle deletions
         if: ${{ steps.changes.outputs.deleted != '' }}
