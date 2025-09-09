@@ -1,4 +1,4 @@
-name: Generate News Index
+name: Update News Index
 
 on:
   push:
@@ -9,22 +9,43 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  update-index:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Generate news index JSON
+      - name: Ensure index.json exists
         run: |
-          echo "[]" > news/index.json
-          files=$(ls news/*.md | sort)
+          mkdir -p news
+          if [ ! -f news/index.json ]; then
+            echo "[]" > news/index.json
+          fi
 
-          for file in $files; do
+      - name: Get changed files
+        id: changes
+        run: |
+          echo "added_or_modified=$(git diff --name-only --diff-filter=AM ${{ github.event.before }} ${{ github.sha }} | grep '^news/.*\.md$' || true)" >> $GITHUB_OUTPUT
+          echo "deleted=$(git diff --name-only --diff-filter=D ${{ github.event.before }} ${{ github.sha }} | grep '^news/.*\.md$' || true)" >> $GITHUB_OUTPUT
+
+      - name: Handle deletions
+        if: ${{ steps.changes.outputs.deleted != '' }}
+        run: |
+          for file in ${{ steps.changes.outputs.deleted }}; do
+            filename=$(basename "$file")
+            jq --arg file "$filename" 'map(select(.file != $file))' news/index.json > tmp.json && mv tmp.json news/index.json
+          done
+
+      - name: Handle additions/updates
+        if: ${{ steps.changes.outputs.added_or_modified != '' }}
+        run: |
+          for file in ${{ steps.changes.outputs.added_or_modified }}; do
             filename=$(basename "$file")
             created=$(git log --diff-filter=A --follow --format=%aI -- "$file" | tail -1)
             updated=$(git log -1 --format=%aI -- "$file")
             title=$(head -n 1 "$file" | sed 's/^# *//')
+            # 一旦削除してから再追加(更新対応)
+            jq --arg file "$filename" 'map(select(.file != $file))' news/index.json > tmp.json && mv tmp.json news/index.json
             jq --arg title "$title" \
                --arg file "$filename" \
                --arg created "$created" \
@@ -33,7 +54,7 @@ jobs:
                news/index.json > tmp.json && mv tmp.json news/index.json
           done
 
-      - name: Commit and push index.json
+      - name: Commit and push changes
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
